@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -124,11 +125,15 @@ func (h *WebSocketHub) HandleWS(w http.ResponseWriter, r *http.Request) {
 	sid := r.URL.Query().Get("session_id")
 	if sid == "" {
 		sid = newRequestID()
+	} else if !isValidSessionID(sid) {
+		log.Printf("websocket: rejected invalid session_id=%q, generating new", sid)
+		sid = newRequestID()
 	}
 
 	h.mu.Lock()
 	h.conns[conn] = &wsConnState{sessionID: sid}
 	h.mu.Unlock()
+	log.Printf("websocket: connected session_id=%s remote=%s", sid, r.RemoteAddr)
 
 	defer func() {
 		h.mu.Lock()
@@ -525,4 +530,10 @@ func (h *WebSocketHub) ConnectionCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.conns)
+}
+
+var validSessionID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+
+func isValidSessionID(sid string) bool {
+	return validSessionID.MatchString(sid)
 }
