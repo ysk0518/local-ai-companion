@@ -145,10 +145,10 @@ func TestSetState_NoCallback(t *testing.T) {
 	}
 }
 
-func TestIsPrivateURL(t *testing.T) {
+func TestValidatePublicURL(t *testing.T) {
 	tests := []struct {
 		url     string
-		private bool
+		blocked bool
 	}{
 		{"http://localhost/test", true},
 		{"http://127.0.0.1:8080/test", true},
@@ -160,9 +160,10 @@ func TestIsPrivateURL(t *testing.T) {
 		{"https://google.com", false},
 	}
 	for _, tt := range tests {
-		result := isPrivateURL(tt.url)
-		if result != tt.private {
-			t.Errorf("isPrivateURL(%q) = %v, want %v", tt.url, result, tt.private)
+		err := validatePublicURL(tt.url)
+		blocked := err != nil
+		if blocked != tt.blocked {
+			t.Errorf("validatePublicURL(%q) blocked=%v, want %v (err=%v)", tt.url, blocked, tt.blocked, err)
 		}
 	}
 }
