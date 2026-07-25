@@ -143,9 +143,11 @@ namespace AICompanion
         private WebSocketClient _wsClient;
         private WebSocketClient _voiceWsClient;
         private const float ResponseScrollPadding = 16f;
+        private const string SessionIdPlayerPrefsKey = "local_ai_companion.session_id";
         private readonly List<string> _responseLines = new();
         private readonly Queue<AudioClip> _audioQueue = new();
         private string _currentState = "UNKNOWN";
+        private string _sessionId;
         private string _pendingSpeechRequestId;
         private string _voiceRequestId;
         private string _selectedMicDevice;
@@ -192,7 +194,12 @@ namespace AICompanion
             else
             {
                 // WebSocket クライアント初期化
-                _wsClient = new WebSocketClient(_wsUrl, "control");
+                _sessionId = GetOrCreateSessionId();
+                var controlWsUrl = AppendSessionIdToWebSocketUrl(_wsUrl, _sessionId);
+                var voiceWsUrl = AppendSessionIdToWebSocketUrl(FirstNonEmpty(_voiceWsUrl, _wsUrl), _sessionId);
+                Debug.Log($"[UI] session_id={_sessionId}");
+
+                _wsClient = new WebSocketClient(controlWsUrl, "control");
                 _wsClient.OnConnected += HandleConnected;
                 _wsClient.OnDisconnected += HandleDisconnected;
                 _wsClient.OnMessageReceived += HandleMessageReceived;
@@ -200,7 +207,7 @@ namespace AICompanion
 
                 if (_useSeparateVoiceWebSocket)
                 {
-                    _voiceWsClient = new WebSocketClient(FirstNonEmpty(_voiceWsUrl, _wsUrl), "voice");
+                    _voiceWsClient = new WebSocketClient(voiceWsUrl, "voice");
                     _voiceWsClient.OnConnected += HandleVoiceConnected;
                     _voiceWsClient.OnDisconnected += HandleVoiceDisconnected;
                     _voiceWsClient.OnMessageReceived += HandleVoiceMessageReceived;
@@ -895,6 +902,53 @@ namespace AICompanion
                     return value;
             }
             return null;
+        }
+
+        private static string GetOrCreateSessionId()
+        {
+            var sessionId = PlayerPrefs.GetString(SessionIdPlayerPrefsKey, "");
+            if (!string.IsNullOrEmpty(sessionId))
+                return sessionId;
+
+            sessionId = "unity-" + Guid.NewGuid();
+            PlayerPrefs.SetString(SessionIdPlayerPrefsKey, sessionId);
+            PlayerPrefs.Save();
+            return sessionId;
+        }
+
+        private static string AppendSessionIdToWebSocketUrl(string url, string sessionId)
+        {
+            if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(sessionId))
+                return url;
+            if (UrlHasQueryKey(url, "session_id"))
+                return url;
+
+            var fragmentIndex = url.IndexOf('#');
+            var baseUrl = fragmentIndex >= 0 ? url.Substring(0, fragmentIndex) : url;
+            var fragment = fragmentIndex >= 0 ? url.Substring(fragmentIndex) : "";
+            var separator = baseUrl.Contains("?") ? "&" : "?";
+            return baseUrl + separator + "session_id=" + Uri.EscapeDataString(sessionId) + fragment;
+        }
+
+        private static bool UrlHasQueryKey(string url, string key)
+        {
+            var queryIndex = url.IndexOf('?');
+            if (queryIndex < 0)
+                return false;
+
+            var fragmentIndex = url.IndexOf('#', queryIndex);
+            var query = fragmentIndex >= 0
+                ? url.Substring(queryIndex + 1, fragmentIndex - queryIndex - 1)
+                : url.Substring(queryIndex + 1);
+            var entries = query.Split('&');
+            foreach (var entry in entries)
+            {
+                var equalsIndex = entry.IndexOf('=');
+                var entryKey = equalsIndex >= 0 ? entry.Substring(0, equalsIndex) : entry;
+                if (string.Equals(Uri.UnescapeDataString(entryKey), key, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private WebSocketClient VoiceSocket()
