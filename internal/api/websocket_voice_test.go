@@ -14,6 +14,12 @@ import (
 	"github.com/ysk-dev-taualpha/local-ai-companion/runtime/internal/state"
 )
 
+type fakeTTSClient struct{}
+
+func (fakeTTSClient) Speak(text string) ([]byte, error) {
+	return []byte("wav"), nil
+}
+
 func readAllMessages(t *testing.T, conn *websocket.Conn, timeout time.Duration) []string {
 	t.Helper()
 	var msgs []string
@@ -199,6 +205,44 @@ func TestVoiceInputCancelSpeech(t *testing.T) {
 	hub.stateMachine.Reset()
 	if hub.stateMachine.Current() != state.IDLE {
 		t.Errorf("expected IDLE after reset, got %s", hub.stateMachine.Current())
+	}
+}
+
+func TestSendTTSSeparatelyResetsStateToIdle(t *testing.T) {
+	hub := NewWebSocketHub(nil, nil, fakeTTSClient{}, state.New(nil), 5000, nil, nil, nil)
+	if err := hub.stateMachine.Transition(state.LISTENING); err != nil {
+		t.Fatalf("LISTENING transition: %v", err)
+	}
+	if err := hub.stateMachine.Transition(state.THINKING); err != nil {
+		t.Fatalf("THINKING transition: %v", err)
+	}
+	if err := hub.stateMachine.Transition(state.SPEAKING); err != nil {
+		t.Fatalf("SPEAKING transition: %v", err)
+	}
+
+	hub.sendTTSSeparately(nil, "req-tts", "hello")
+
+	if hub.stateMachine.Current() != state.IDLE {
+		t.Fatalf("expected IDLE after TTS completion, got %s", hub.stateMachine.Current())
+	}
+}
+
+func TestSendTTSSeparatelyResetsStateWithoutTTSClient(t *testing.T) {
+	hub := NewWebSocketHub(nil, nil, nil, state.New(nil), 5000, nil, nil, nil)
+	if err := hub.stateMachine.Transition(state.LISTENING); err != nil {
+		t.Fatalf("LISTENING transition: %v", err)
+	}
+	if err := hub.stateMachine.Transition(state.THINKING); err != nil {
+		t.Fatalf("THINKING transition: %v", err)
+	}
+	if err := hub.stateMachine.Transition(state.SPEAKING); err != nil {
+		t.Fatalf("SPEAKING transition: %v", err)
+	}
+
+	hub.sendTTSSeparately(nil, "req-tts", "hello")
+
+	if hub.stateMachine.Current() != state.IDLE {
+		t.Fatalf("expected IDLE without TTS client, got %s", hub.stateMachine.Current())
 	}
 }
 
