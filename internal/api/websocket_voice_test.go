@@ -153,6 +153,11 @@ func TestVoiceInputErrorRecovery(t *testing.T) {
 	if !hasError {
 		t.Error("expected error response")
 	}
+	// Poll for IDLE — handler may still be completing state transitions
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.stateMachine.Current() != state.IDLE && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if hub.stateMachine.Current() != state.IDLE {
 		t.Errorf("expected IDLE after error, got %s", hub.stateMachine.Current())
 	}
