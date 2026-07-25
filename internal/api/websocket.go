@@ -305,26 +305,30 @@ func (h *WebSocketHub) HandleVoiceTextAgent(conn *websocket.Conn, text, requestI
 }
 
 func (h *WebSocketHub) sendTTSSeparately(conn *websocket.Conn, requestID, text string) {
-	func() {
-		defer func() { recover() }()
-		if h.ttsClient == nil || text == "" {
-			return
-		}
-		audioData, ttsErr := h.ttsClient.Speak(text)
-		if ttsErr != nil {
-			log.Printf("websocket: tts synthesis failed: %v", ttsErr)
-			return
-		}
-		audioMsg := WSAudioMessage{
-			Type:      "audio",
-			RequestID: requestID,
-			Data:      base64.StdEncoding.EncodeToString(audioData),
-			Format:    "wav",
-		}
-		if err := h.writeJSON(conn, audioMsg); err != nil {
-			log.Printf("websocket: failed to write audio message: %v", err)
+	defer h.resetAndBroadcastIdle()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("websocket: tts synthesis panicked: %v", r)
 		}
 	}()
+
+	if h.ttsClient == nil || text == "" {
+		return
+	}
+	audioData, ttsErr := h.ttsClient.Speak(text)
+	if ttsErr != nil {
+		log.Printf("websocket: tts synthesis failed: %v", ttsErr)
+		return
+	}
+	audioMsg := WSAudioMessage{
+		Type:      "audio",
+		RequestID: requestID,
+		Data:      base64.StdEncoding.EncodeToString(audioData),
+		Format:    "wav",
+	}
+	if err := h.writeJSON(conn, audioMsg); err != nil {
+		log.Printf("websocket: failed to write audio message: %v", err)
+	}
 }
 
 func parseAssistantResponse(raw string) client.AssistantMessage {

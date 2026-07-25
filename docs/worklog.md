@@ -50,3 +50,41 @@
 
 ### 次回
 - v0.6: Character Control（表情・モーション・口パク）
+
+## 2026-07-25: v0.5 完了後コードレビュー修正
+
+### レビュー結果
+- [x] v0.5 完了後の `main` を `origin/main` に同期
+- [x] open issue / open PR が 0 件であることを確認
+- [x] ローカル未コミット差分を `stash@{0}` (`codex-before-sync-2026-07-25`) に退避
+- [x] Go / Python のローカルテスト回帰を確認
+
+### 発見した問題
+- [x] `internal/tool/tools/tools_test.go`: 削除済み helper `isPrivateURL` 参照により `go test ./...` が build failure
+- [x] `tests/test_cli.py`: `/tmp` 固定パスにより Windows 環境で unittest が失敗
+- [x] `internal/api/websocket.go`: agent 経由応答で TTS 後に `SPEAKING` から `IDLE` へ戻らない可能性
+
+### 修正
+- [x] Issue #166 作成: `fix: v0.5 完了後レビューで見つかったテスト回帰と状態復帰を修正`
+- [x] PR #167 作成: `v0.5レビュー修正: テスト回帰とTTS後の状態復帰を修正`
+- [x] `sendTTSSeparately` に TTS 成功/失敗/未設定後の `IDLE` 復帰を追加
+- [x] `validatePublicURL` 向けに Go テストを更新
+- [x] Python CLI テストを `tempfile.TemporaryDirectory()` ベースに変更
+
+### 確認
+```text
+git diff --check
+PYTHONPATH=src python -m unittest discover -s tests
+go test ./...
+```
+
+結果:
+```text
+Python: Ran 136 tests ... OK
+Go: 全パッケージ PASS
+```
+
+### PR 一覧
+| PR | 内容 | 状態 |
+|----|------|------|
+| #167 | v0.5レビュー修正: テスト回帰とTTS後の状態復帰 | open |

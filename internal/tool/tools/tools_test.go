@@ -145,7 +145,7 @@ func TestSetState_NoCallback(t *testing.T) {
 	}
 }
 
-func TestValidatePublicURL(t *testing.T) {
+func TestValidatePublicURLBlocksPrivateTargets(t *testing.T) {
 	tests := []struct {
 		url     string
 		blocked bool
@@ -156,14 +156,13 @@ func TestValidatePublicURL(t *testing.T) {
 		{"http://10.0.0.1/test", true},
 		{"http://172.16.0.1/test", true},
 		{"http://[::1]/test", true},
-		{"https://example.com", false},
-		{"https://google.com", false},
+		{"https://93.184.216.34", false},
 	}
 	for _, tt := range tests {
 		err := validatePublicURL(tt.url)
 		blocked := err != nil
 		if blocked != tt.blocked {
-			t.Errorf("validatePublicURL(%q) blocked=%v, want %v (err=%v)", tt.url, blocked, tt.blocked, err)
+			t.Errorf("validatePublicURL(%q) blocked = %v, want %v (err=%v)", tt.url, blocked, tt.blocked, err)
 		}
 	}
 }

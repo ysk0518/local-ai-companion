@@ -71,16 +71,20 @@ import sys  # noqa: E402 (needed for test_run_once_uses_request_id_in_output abo
 class MakeLogWriterTests(unittest.TestCase):
     def test_with_log_dir_arg(self):
         config = AppConfig()
-        writer = _make_log_writer(config, "/tmp/test_logs")
-        self.assertIsNotNone(writer)
-        from local_ai_companion.log_writer import JSONLLogWriter
-        self.assertIsInstance(writer, JSONLLogWriter)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = os.path.join(tmpdir, "test_logs")
+            writer = _make_log_writer(config, log_dir)
+            self.assertIsNotNone(writer)
+            from local_ai_companion.log_writer import JSONLLogWriter
+            self.assertIsInstance(writer, JSONLLogWriter)
 
     def test_with_config_logging_enabled(self):
         from local_ai_companion.config import LoggingConfig
-        config = AppConfig(logging=LoggingConfig(enabled=True, log_dir="/tmp/test_config_logs"))
-        writer = _make_log_writer(config, None)
-        self.assertIsNotNone(writer)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = os.path.join(tmpdir, "test_config_logs")
+            config = AppConfig(logging=LoggingConfig(enabled=True, log_dir=log_dir))
+            writer = _make_log_writer(config, None)
+            self.assertIsNotNone(writer)
 
     def test_disabled_returns_none(self):
         config = AppConfig()
@@ -89,9 +93,12 @@ class MakeLogWriterTests(unittest.TestCase):
 
     def test_log_dir_arg_overrides_config(self):
         from local_ai_companion.config import LoggingConfig
-        config = AppConfig(logging=LoggingConfig(enabled=True, log_dir="/tmp/from_config"))
-        writer = _make_log_writer(config, "/tmp/from_arg")
-        self.assertIsNotNone(writer)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, "from_config")
+            arg_dir = os.path.join(tmpdir, "from_arg")
+            config = AppConfig(logging=LoggingConfig(enabled=True, log_dir=config_dir))
+            writer = _make_log_writer(config, arg_dir)
+            self.assertIsNotNone(writer)
 
 
 class MainTests(unittest.TestCase):
