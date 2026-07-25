@@ -79,7 +79,6 @@ type WSStateNotification struct {
 
 type wsConnState struct {
 	writeMu   sync.Mutex
-	mu        sync.Mutex // per-session agent lock (replaces global agentMu)
 	sessionID string
 }
 
@@ -87,6 +86,8 @@ type WebSocketHub struct {
 	mu               sync.RWMutex
 	stateMu          sync.Mutex
 	conns            map[*websocket.Conn]*wsConnState
+	sessionLocks     map[string]*sync.Mutex
+	sessionLocksMu   sync.Mutex
 	memoryStore      *memory.Store
 	pythonClient     PythonClient
 	ttsClient        tts.TTSClient
@@ -101,6 +102,7 @@ type WebSocketHub struct {
 func NewWebSocketHub(memStore *memory.Store, pythonClient PythonClient, ttsClient tts.TTSClient, stateMachine *state.StateMachine, requestTimeoutMs int, allowedOrigins []string, agentLoop *agent.Loop, vp *VoicePipeline) *WebSocketHub {
 	return &WebSocketHub{
 		conns:            make(map[*websocket.Conn]*wsConnState),
+		sessionLocks:     make(map[string]*sync.Mutex),
 		memoryStore:      memStore,
 		pythonClient:     pythonClient,
 		ttsClient:        ttsClient,
@@ -195,8 +197,9 @@ func (h *WebSocketHub) handleTextMessageAgent(conn *websocket.Conn, msg WSMessag
 	if cs == nil {
 		return
 	}
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	sessionLock := h.acquireSessionLock(cs.sessionID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
 
 	h.stateMu.Lock()
 	if err := h.stateMachine.Transition(state.LISTENING); err != nil {
@@ -267,8 +270,9 @@ func (h *WebSocketHub) HandleVoiceTextAgent(conn *websocket.Conn, text, requestI
 	if cs == nil {
 		return
 	}
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	sessionLock := h.acquireSessionLock(cs.sessionID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -536,4 +540,18 @@ var validSessionID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 func isValidSessionID(sid string) bool {
 	return validSessionID.MatchString(sid)
+}
+
+// acquireSessionLock returns the mutex for a session, creating one if needed.
+// Same session_id across multiple WebSocket connections share the same lock,
+// ensuring agent turns are serialized per session.
+func (h *WebSocketHub) acquireSessionLock(sessionID string) *sync.Mutex {
+	h.sessionLocksMu.Lock()
+	defer h.sessionLocksMu.Unlock()
+	if mu, ok := h.sessionLocks[sessionID]; ok {
+		return mu
+	}
+	mu := &sync.Mutex{}
+	h.sessionLocks[sessionID] = mu
+	return mu
 }
