@@ -592,7 +592,8 @@ namespace AICompanion
                 {
                     RotateVoiceRequest();
                     UpdateMicStatusText();
-                    StopAudioPlayback();
+                    // The runtime sends IDLE after delivering TTS audio. Keep queued audio playing;
+                    // explicit audio_control messages are responsible for cancellation.
                 }
                 return true;
             }
