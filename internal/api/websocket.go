@@ -83,20 +83,22 @@ type wsConnState struct {
 }
 
 type WebSocketHub struct {
-	mu               sync.RWMutex
-	stateMu          sync.Mutex
-	conns            map[*websocket.Conn]*wsConnState
-	sessionLocks     map[string]*sync.Mutex
-	sessionLocksMu   sync.Mutex
-	memoryStore      *memory.Store
-	pythonClient     PythonClient
-	ttsClient        tts.TTSClient
-	stateMachine     *state.StateMachine
-	agentLoop        *agent.Loop
-	voicePipeline    *VoicePipeline
-	pendingCancels   map[string]context.CancelFunc
-	requestTimeoutMs int
-	upgrader         websocket.Upgrader
+	mu                       sync.RWMutex
+	stateMu                  sync.Mutex
+	conns                    map[*websocket.Conn]*wsConnState
+	sessionLocks             map[string]*sync.Mutex
+	sessionLocksMu           sync.Mutex
+	memoryStore              *memory.Store
+	pythonClient             PythonClient
+	ttsClient                tts.TTSClient
+	stateMachine             *state.StateMachine
+	agentLoop                *agent.Loop
+	voicePipeline            *VoicePipeline
+	pendingCancels           map[string]context.CancelFunc
+	pendingPlaybackConn      *websocket.Conn
+	pendingPlaybackRequestID string
+	requestTimeoutMs         int
+	upgrader                 websocket.Upgrader
 }
 
 func NewWebSocketHub(memStore *memory.Store, pythonClient PythonClient, ttsClient tts.TTSClient, stateMachine *state.StateMachine, requestTimeoutMs int, allowedOrigins []string, agentLoop *agent.Loop, vp *VoicePipeline) *WebSocketHub {
@@ -141,6 +143,7 @@ func (h *WebSocketHub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		delete(h.conns, conn)
 		h.mu.Unlock()
+		h.clearPendingPlaybackForConnection(conn)
 		conn.Close()
 	}()
 
@@ -169,6 +172,8 @@ func (h *WebSocketHub) HandleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		case "cancel_speech":
 			h.handleCancelSpeech(msg.RequestID)
+		case "audio_playback_finished":
+			h.handleAudioPlaybackFinished(conn, msg.RequestID)
 		default:
 			h.handleEcho(conn, msg)
 		}
@@ -314,19 +319,21 @@ func (h *WebSocketHub) HandleVoiceTextAgent(conn *websocket.Conn, text, requestI
 }
 
 func (h *WebSocketHub) sendTTSSeparately(conn *websocket.Conn, requestID, text string) {
-	defer h.resetAndBroadcastIdle()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("websocket: tts synthesis panicked: %v", r)
+			h.resetAndBroadcastIdle()
 		}
 	}()
 
 	if h.ttsClient == nil || text == "" {
+		h.resetAndBroadcastIdle()
 		return
 	}
 	audioData, ttsErr := h.ttsClient.Speak(text)
 	if ttsErr != nil {
 		log.Printf("websocket: tts synthesis failed: %v", ttsErr)
+		h.resetAndBroadcastIdle()
 		return
 	}
 	audioMsg := WSAudioMessage{
@@ -335,8 +342,10 @@ func (h *WebSocketHub) sendTTSSeparately(conn *websocket.Conn, requestID, text s
 		Data:      base64.StdEncoding.EncodeToString(audioData),
 		Format:    "wav",
 	}
+	h.markPendingPlayback(conn, requestID)
 	if err := h.writeJSON(conn, audioMsg); err != nil {
 		log.Printf("websocket: failed to write audio message: %v", err)
+		h.clearPendingPlaybackForConnection(conn)
 	}
 }
 
@@ -443,7 +452,43 @@ func (h *WebSocketHub) handleTextMessage(conn *websocket.Conn, msg WSMessage) {
 func (h *WebSocketHub) resetAndBroadcastIdle() {
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
+	h.pendingPlaybackConn = nil
+	h.pendingPlaybackRequestID = ""
 	h.stateMachine.Reset()
+	h.broadcastState("IDLE")
+}
+
+func (h *WebSocketHub) markPendingPlayback(conn *websocket.Conn, requestID string) {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	h.pendingPlaybackConn = conn
+	h.pendingPlaybackRequestID = requestID
+}
+
+func (h *WebSocketHub) handleAudioPlaybackFinished(conn *websocket.Conn, requestID string) {
+	h.stateMu.Lock()
+	if h.pendingPlaybackConn != conn || h.pendingPlaybackRequestID != requestID {
+		h.stateMu.Unlock()
+		log.Printf("websocket: ignored audio playback completion: request_id=%s", requestID)
+		return
+	}
+	h.pendingPlaybackConn = nil
+	h.pendingPlaybackRequestID = ""
+	h.stateMachine.Reset()
+	h.stateMu.Unlock()
+	h.broadcastState("IDLE")
+}
+
+func (h *WebSocketHub) clearPendingPlaybackForConnection(conn *websocket.Conn) {
+	h.stateMu.Lock()
+	if h.pendingPlaybackConn != conn {
+		h.stateMu.Unlock()
+		return
+	}
+	h.pendingPlaybackConn = nil
+	h.pendingPlaybackRequestID = ""
+	h.stateMachine.Reset()
+	h.stateMu.Unlock()
 	h.broadcastState("IDLE")
 }
 

@@ -439,9 +439,24 @@ v0.4 で導入された TTS 連携の API 仕様。
 4. Go Runtime が Python AI Service に TTS 生成をリクエスト
 5. Go Runtime が type: "audio" を WebSocket で送信（base64 エンコード音声）
 6. クライアント（Unity）が audio データを受信し、再生
+7. Unity が再生完了後に `audio_playback_finished` を送信
+8. Go Runtime が `state_change: IDLE` を送信
 ```
 
 ai_response と audio の連続送信は同一 WebSocket 接続上で行われ、request_id で紐付けられる。
+
+### `audio_playback_finished` メッセージ（Unity → Go Runtime）
+
+Unity は `audio` メッセージで受け取った音声キューをすべて再生した後、受信元と同じ WebSocket 接続へ送信する。
+
+```json
+{
+  "type": "audio_playback_finished",
+  "request_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+Go Runtime は request_id と接続が一致する通知を受けた場合だけ `SPEAKING` から `IDLE` へ遷移する。接続が切断された場合も `IDLE` へ戻す。
 
 ### Unity 受信仕様
 
@@ -605,7 +620,8 @@ Unity
 4. Runtime が `{"type":"ai_response", ...}` を返す
 5. Runtime が `{"type":"state_change","state":"SPEAKING"}` を返す
 6. Runtime が `{"type":"audio", ...}` を返す（音声データ）
-7. Runtime が `{"type":"state_change","state":"IDLE"}` を返す
+7. Unity が `{"type":"audio_playback_finished", ...}` を返す
+8. Runtime が `{"type":"state_change","state":"IDLE"}` を返す
 
 `audio` メッセージは `ai_response` の直後、`SPEAKING` 状態遷移の後に送信される。`ai_response` に続いて `audio` が送信されない場合、音声なし応答（テキストのみ）とみなす。
 
