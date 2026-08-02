@@ -213,7 +213,7 @@ func TestVoiceInputCancelSpeech(t *testing.T) {
 	}
 }
 
-func TestSendTTSSeparatelyResetsStateToIdle(t *testing.T) {
+func TestSendTTSSeparatelyWaitsForPlaybackCompletion(t *testing.T) {
 	hub := NewWebSocketHub(nil, nil, fakeTTSClient{}, state.New(nil), 5000, nil, nil, nil)
 	if err := hub.stateMachine.Transition(state.LISTENING); err != nil {
 		t.Fatalf("LISTENING transition: %v", err)
@@ -227,8 +227,16 @@ func TestSendTTSSeparatelyResetsStateToIdle(t *testing.T) {
 
 	hub.sendTTSSeparately(nil, "req-tts", "hello")
 
+	if hub.stateMachine.Current() != state.SPEAKING {
+		t.Fatalf("expected SPEAKING until playback completion, got %s", hub.stateMachine.Current())
+	}
+	hub.handleAudioPlaybackFinished(nil, "other-request")
+	if hub.stateMachine.Current() != state.SPEAKING {
+		t.Fatalf("expected mismatched completion to keep SPEAKING, got %s", hub.stateMachine.Current())
+	}
+	hub.handleAudioPlaybackFinished(nil, "req-tts")
 	if hub.stateMachine.Current() != state.IDLE {
-		t.Fatalf("expected IDLE after TTS completion, got %s", hub.stateMachine.Current())
+		t.Fatalf("expected IDLE after playback completion, got %s", hub.stateMachine.Current())
 	}
 }
 

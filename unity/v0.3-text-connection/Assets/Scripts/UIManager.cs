@@ -88,6 +88,13 @@ namespace AICompanion
     }
 
     [Serializable]
+    public class AudioPlaybackFinishedJson
+    {
+        public string type;
+        public string request_id;
+    }
+
+    [Serializable]
     public class SpeechRecognizedJson
     {
         public string type;
@@ -149,9 +156,11 @@ namespace AICompanion
         private string _currentState = "UNKNOWN";
         private string _sessionId;
         private string _pendingSpeechRequestId;
+        private string _playingAudioRequestId;
         private string _voiceRequestId;
         private string _selectedMicDevice;
         private string _lastVoiceError;
+        private WebSocketClient _playingAudioClient;
         private bool _httpFallbackMode;
         private bool _micStreaming;
         private bool _updatingMicDeviceDropdown;
@@ -535,11 +544,11 @@ namespace AICompanion
             {
                 if (TryHandleSpeechRecognized(json))
                     return;
-                if (TryHandleAiResponse(json))
+                if (TryHandleAiResponse(json, _voiceWsClient))
                     return;
                 if (TryHandleError(json))
                     return;
-                if (TryHandleAudioMessage(json))
+                if (TryHandleAudioMessage(json, _voiceWsClient))
                     return;
                 if (TryHandleAudioControl(json))
                     return;
@@ -558,11 +567,11 @@ namespace AICompanion
                     return;
                 if (TryHandleSpeechRecognized(json))
                     return;
-                if (TryHandleAudioMessage(json))
+                if (TryHandleAudioMessage(json, _wsClient))
                     return;
                 if (TryHandleAudioControl(json))
                     return;
-                if (TryHandleAiResponse(json))
+                if (TryHandleAiResponse(json, _wsClient))
                     return;
                 if (TryHandleError(json))
                     return;
@@ -592,7 +601,6 @@ namespace AICompanion
                 {
                     RotateVoiceRequest();
                     UpdateMicStatusText();
-                    StopAudioPlayback();
                 }
                 return true;
             }
@@ -649,7 +657,7 @@ namespace AICompanion
             }
         }
 
-        private bool TryHandleAudioMessage(string json)
+        private bool TryHandleAudioMessage(string json, WebSocketClient sourceClient)
         {
             try
             {
@@ -657,7 +665,7 @@ namespace AICompanion
                 if (audioResp == null || audioResp.type != "audio")
                     return false;
 
-                HandleAudioMessage(audioResp);
+                HandleAudioMessage(audioResp, sourceClient);
                 return true;
             }
             catch (Exception ex)
@@ -678,7 +686,7 @@ namespace AICompanion
                 switch (control.action)
                 {
                     case "stop":
-                        StopAudioPlayback();
+                        StopAudioPlayback(notifyRuntime: true);
                         AppendResponse("<color=#ffcc66>[Audio] stopped</color>");
                         return true;
                     case "clear_queue":
@@ -697,7 +705,7 @@ namespace AICompanion
             }
         }
 
-        private bool TryHandleAiResponse(string json)
+        private bool TryHandleAiResponse(string json, WebSocketClient sourceClient)
         {
             try
             {
@@ -728,7 +736,7 @@ namespace AICompanion
                     {
                         request_id = aiResp.request_id,
                         data = aiResp.audio
-                    });
+                    }, sourceClient);
                 }
                 SetSendingState(false);
                 return true;
@@ -797,7 +805,7 @@ namespace AICompanion
             }
         }
 
-        private void HandleAudioMessage(AudioMessageJson audioResp)
+        private void HandleAudioMessage(AudioMessageJson audioResp, WebSocketClient sourceClient)
         {
             var base64 = FirstNonEmpty(audioResp.data, audioResp.audio, audioResp.audio_base64);
             if (string.IsNullOrEmpty(base64))
@@ -810,6 +818,8 @@ namespace AICompanion
             {
                 var bytes = Convert.FromBase64String(base64);
                 var clip = WavAudioClip.Create(bytes, $"AICompanionAudio-{audioResp.request_id}");
+                _playingAudioRequestId = audioResp.request_id;
+                _playingAudioClient = sourceClient;
                 EnqueueAudio(clip);
                 AppendResponse($"<color=#88ccff>[Audio] queued {clip.length:0.00}s</color>");
             }
@@ -861,11 +871,29 @@ namespace AICompanion
             }
 
             _audioPlaybackCoroutine = null;
+            NotifyAudioPlaybackFinished();
             if (_currentState != "SPEAKING")
                 UpdateStatus($"State: {_currentState}");
         }
 
-        private void StopAudioPlayback()
+        private void NotifyAudioPlaybackFinished()
+        {
+            if (string.IsNullOrEmpty(_playingAudioRequestId) || _playingAudioClient == null)
+                return;
+
+            var requestId = _playingAudioRequestId;
+            var client = _playingAudioClient;
+            _playingAudioRequestId = null;
+            _playingAudioClient = null;
+            var json = JsonUtility.ToJson(new AudioPlaybackFinishedJson
+            {
+                type = "audio_playback_finished",
+                request_id = requestId
+            });
+            _ = client.SendAsync(json);
+        }
+
+        private void StopAudioPlayback(bool notifyRuntime = false)
         {
             if (_audioPlaybackCoroutine != null)
             {
@@ -882,6 +910,10 @@ namespace AICompanion
             }
 
             ClearAudioQueue();
+            if (notifyRuntime)
+                NotifyAudioPlaybackFinished();
+            _playingAudioRequestId = null;
+            _playingAudioClient = null;
         }
 
         private void ClearAudioQueue()
