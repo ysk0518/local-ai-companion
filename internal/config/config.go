@@ -94,8 +94,8 @@ func Load(path string) (*Config, error) {
 		},
 		Ollama: OllamaConfig{
 			Enabled:   false,
-			BaseURL:   "http://192.168.12.107:11434",
-			Model:     "g4v100",
+			BaseURL:   "http://127.0.0.1:11434",
+			Model:     "qwen3:14b",
 			TimeoutMs: 60000,
 		},
 		Agent: AgentConfig{
@@ -111,7 +111,7 @@ func Load(path string) (*Config, error) {
 		VoiceInput: VoiceInputConfig{
 			Enabled:      false,
 			VADURL:       "http://127.0.0.1:8092",
-			STTServerURL: "http://192.168.12.107:8093/v1/transcribe",
+			STTServerURL: "http://127.0.0.1:8093/v1/transcribe",
 			STTTimeoutMs: 10000,
 		},
 	}
